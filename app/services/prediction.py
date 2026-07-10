@@ -19,13 +19,8 @@ logger = logging.getLogger(__name__)
 class PredictionService:
     async def predict_delay(self, db: AsyncSession, shipment_id: int) -> Dict[str, Any]:
         """
-        Predicts the transit delay (in hours) and the probability of delay for a shipment.
-        Provides exact SHAP values for:
-        1. Weather (precipitation and temperature along route)
-        2. News Disruptions (accidents, strikes, blocks near route)
-        3. Carrier Reliability (historical performance index)
+        Retrieves a shipment from the database and runs delay prediction.
         """
-        # Fetch shipment with details
         stmt = (
             select(Shipment)
             .options(
@@ -40,6 +35,13 @@ class PredictionService:
         if not shipment:
             raise ValueError(f"Shipment with ID {shipment_id} not found.")
 
+        return await self.predict_delay_for_shipment(db, shipment)
+
+    async def predict_delay_for_shipment(self, db: AsyncSession, shipment: Shipment) -> Dict[str, Any]:
+        """
+        Predicts transit delay and probability using a pre-loaded Shipment model object.
+        Used directly by What-If simulation engine.
+        """
         # 1. WEATHER DELAY COMPONENT
         weather_delay = 0.0
         weather_data = []
@@ -48,18 +50,15 @@ class PredictionService:
                 weather_data = await weather_service.get_forecast(shipment.route.waypoints)
                 for w in weather_data:
                     temp = w.get("temp", 25.0)
-                    pop = w.get("pop", 0.0) # probability of precipitation
-                    # High heat adds delay (reduced driver speed, caution)
+                    pop = w.get("pop", 0.0)
                     if temp > 35.0:
                         weather_delay += 0.4
-                    # Rain adds delay
                     if pop > 0.5:
                         weather_delay += 0.8
-                # Limit weather delay impact
                 weather_delay = min(weather_delay, 4.0)
             except Exception as e:
                 logger.error(f"Weather fetch failed for delay prediction: {e}")
-                weather_delay = 1.0 # fallback default weather impact
+                weather_delay = 1.0
 
         # 2. NEWS DISRUPTIONS COMPONENT
         news_delay = 0.0
@@ -74,7 +73,6 @@ class PredictionService:
                         news_delay += 1.5
                     else:
                         news_delay += 0.5
-                # Limit news delay impact
                 news_delay = min(news_delay, 6.0)
             except Exception as e:
                 logger.error(f"News fetch failed for delay prediction: {e}")
@@ -85,20 +83,17 @@ class PredictionService:
         carrier_delay = max(0.0, (100.0 - carrier_reliability) / 8.0)
 
         # 4. INTERACTION TERM
-        # Bad weather interacts with carrier unreliability to multiply delays
         interaction = weather_delay * carrier_delay * 0.15
 
         # 5. SHAP CALCULATOR (3-Feature Game)
-        # Features: S = {1: Weather, 2: News, 3: Carrier}
-        # Model: v(S) = base_val + W(S) + N(S) + C(S) + Interaction(S)
-        base_value = 0.5 # nominal baseline delay in hours
+        base_value = 0.5
 
         W = weather_delay
         N = news_delay
         C = carrier_delay
         I = interaction
 
-        # Characteristic function evaluations v(S)
+        # v(S)
         v_empty = base_value
         v_1 = base_value + W
         v_2 = base_value + N
@@ -108,23 +103,20 @@ class PredictionService:
         v_23 = base_value + N + C
         v_123 = base_value + W + N + C + I
 
-        # Compute Shapley Values analytically
+        # Shapley Values
         shap_weather = W + 0.5 * I
         shap_news = N
         shap_carrier = C + 0.5 * I
 
-        # Verify efficiency property: sum(shap) == v(123) - v(empty)
+        # Verify efficiency property
         total_effect = v_123 - v_empty
         assert abs((shap_weather + shap_news + shap_carrier) - total_effect) < 1e-5
 
         predicted_delay_hours = v_123
-
-        # Convert delay hours into a probability of delay (exceeding nominal schedule)
-        # Let's say any delay over 2.0 hours represents a delayed shipment
         delay_probability = 1.0 / (1.0 + math.exp(-(predicted_delay_hours - 2.0) / 1.5))
 
         return {
-            "shipment_id": shipment_id,
+            "shipment_id": shipment.id or 0,
             "predicted_delay_hours": round(predicted_delay_hours, 2),
             "delay_probability": round(delay_probability, 3),
             "base_value": base_value,
@@ -149,19 +141,14 @@ class PredictionService:
 
     async def predict_spoilage(self, db: AsyncSession, shipment_id: int) -> Dict[str, Any]:
         """
-        Predicts the spoilage probability (0.0 to 1.0) and assigns a risk category.
-        Features:
-        1. Box Quality (based on cold box age)
-        2. Temp Exposure (maximum ambient temperature forecast along route waypoints)
-        3. Transit Delay (predicted transit delay hours from delay prediction)
-        Calculates exact SHAP values combinatorially over the non-linear logistic function.
+        Retrieves a shipment from the database and runs spoilage prediction.
         """
-        # Fetch shipment
         stmt = (
             select(Shipment)
             .options(
                 selectinload(Shipment.cold_box),
-                selectinload(Shipment.route)
+                selectinload(Shipment.route),
+                selectinload(Shipment.carrier)
             )
             .where(Shipment.id == shipment_id)
         )
@@ -170,13 +157,17 @@ class PredictionService:
         if not shipment:
             raise ValueError(f"Shipment with ID {shipment_id} not found.")
 
-        # Get predicted delay hours
-        delay_pred = await self.predict_delay(db, shipment_id)
-        predicted_delay = delay_pred["predicted_delay_hours"]
+        delay_pred = await self.predict_delay_for_shipment(db, shipment)
+        return await self.predict_spoilage_for_shipment(db, shipment, delay_pred["predicted_delay_hours"])
 
+    async def predict_spoilage_for_shipment(self, db: AsyncSession, shipment: Shipment, predicted_delay: float) -> Dict[str, Any]:
+        """
+        Predicts product spoilage risk using a pre-loaded Shipment model object.
+        Used directly by What-If simulation engine.
+        """
         # 1. BOX QUALITY COEFFICIENT
         box_age = shipment.cold_box.age_months if shipment.cold_box else 12.0
-        box_impact = (box_age / 24.0) * 0.8 # older boxes insulate worse
+        box_impact = (box_age / 24.0) * 0.8
 
         # 2. TEMP EXPOSURE COEFFICIENT
         max_temp = 25.0
@@ -193,14 +184,8 @@ class PredictionService:
         delay_impact = predicted_delay * 0.35
 
         # 4. LOGISTIC FUNCTION EVALUATIONS FOR COMBINATORIAL SHAP
-        # z(S) = z_0 + B_S + T_S + D_S, where z_0 = -3.0 (baseline log-odds of spoilage)
-        # v(S) = sigmoid(z(S))
         z_0 = -3.0
 
-        # Map indices to impact weights
-        # index 1 = Box Quality (B)
-        # index 2 = Temp Exposure (T)
-        # index 3 = Transit Delay (D)
         def v(S_set: set) -> float:
             score = z_0
             if 1 in S_set:
@@ -211,7 +196,6 @@ class PredictionService:
                 score += delay_impact
             return 1.0 / (1.0 + math.exp(-score))
 
-        # Evaluate all subsets for Shapley formula
         v_empty = v(set())
         v_1 = v({1})
         v_2 = v({2})
@@ -221,35 +205,28 @@ class PredictionService:
         v_23 = v({2, 3})
         v_123 = v({1, 2, 3})
 
-        # Combinatorial Shapley Calculation
-        # For feature 1 (Box Quality):
+        # Shapley Calculation
         shap_box = (
             (1/3) * (v_1 - v_empty) +
             (1/6) * ((v_12 - v_2) + (v_13 - v_3)) +
             (1/3) * (v_123 - v_23)
         )
-
-        # For feature 2 (Temp Exposure):
         shap_temp = (
             (1/3) * (v_2 - v_empty) +
             (1/6) * ((v_12 - v_1) + (v_23 - v_3)) +
             (1/3) * (v_123 - v_13)
         )
-
-        # For feature 3 (Transit Delay):
         shap_delay = (
             (1/3) * (v_3 - v_empty) +
             (1/6) * ((v_13 - v_1) + (v_23 - v_2)) +
             (1/3) * (v_123 - v_12)
         )
 
-        # Verify efficiency property
         total_effect = v_123 - v_empty
         assert abs((shap_box + shap_temp + shap_delay) - total_effect) < 1e-5
 
         spoilage_probability = v_123
 
-        # Risk categories based on probability
         if spoilage_probability < 0.12:
             risk_category = "low"
         elif spoilage_probability < 0.35:
@@ -258,7 +235,7 @@ class PredictionService:
             risk_category = "high"
 
         return {
-            "shipment_id": shipment_id,
+            "shipment_id": shipment.id or 0,
             "spoilage_probability": round(spoilage_probability, 3),
             "risk_category": risk_category,
             "base_value": round(v_empty, 4),
@@ -283,35 +260,22 @@ class PredictionService:
 
     async def forecast_demand(self, db: AsyncSession, product_id: int, destination: str, forecast_days: int) -> Dict[str, Any]:
         """
-        Forecasts daily demand at a destination clinic/hospital for a product over forecast_days.
-        Features:
-        1. Historical Baseline (nominal constant demand rate)
-        2. Weather Turnout Impact (monsoon rains or extreme heat reduces turnout)
-        3. Seasonality Outbreaks (outbreak months add seasonal vaccine uptake)
-        Calculates daily forecasts and exact aggregate SHAP explanations.
+        Forecasts daily demand at a destination clinic/hospital.
         """
-        # Verify product exists
         product = (await db.execute(select(Product).where(Product.id == product_id))).scalars().first()
         if not product:
             raise ValueError(f"Product with ID {product_id} not found.")
 
-        # Fixed historical baseline demand per day
         historical_baseline = 120.0
-
         today = datetime.date.today()
         forecast_items = []
         total_forecasted = 0
-
-        # Track cumulative SHAP values across the forecast period
         total_shap_weather = 0.0
         total_shap_seasonality = 0.0
 
-        # We geocode destination to fetch its forecast
-        # We can map standard destination coordinates
         from app.api.endpoints.shipment import geocode_city
         coords = geocode_city(destination)
 
-        # Retrieve weather forecasts at the destination city
         weather_forecast = []
         try:
             weather_forecast = await weather_service.get_forecast([coords])
@@ -320,8 +284,6 @@ class PredictionService:
 
         for d in range(forecast_days):
             target_date = today + datetime.timedelta(days=d)
-            
-            # 1. Seasonality Outbreak factor (Monsoon outbreak surge in June-Sept: +25%. Winter Flu in Nov-Jan: +12%)
             month = target_date.month
             if month in [6, 7, 8, 9]:
                 seasonality_factor = 0.25
@@ -330,37 +292,25 @@ class PredictionService:
             else:
                 seasonality_factor = 0.0
 
-            # 2. Weather Turnout factor
-            # Check forecasted pop/temp for this day if available
             weather_turnout_impact = 0.0
             if d < len(weather_forecast):
                 w_day = weather_forecast[d]
                 pop = w_day.get("pop", 0.0)
                 temp = w_day.get("temp", 25.0)
-                if pop > 0.6: # Heavy rain reduction
+                if pop > 0.6:
                     weather_turnout_impact = -0.15
-                elif temp > 38.0: # Extreme heat reduction
+                elif temp > 38.0:
                     weather_turnout_impact = -0.10
-                elif 20.0 <= temp <= 28.0: # Good weather boost
+                elif 20.0 <= temp <= 28.0:
                     weather_turnout_impact = 0.05
             else:
-                # Mock a slight rain turnout drop in monsoon month
                 if month in [6, 7, 8, 9] and random.random() < 0.4:
                     weather_turnout_impact = -0.15
 
-            # Multiplicative model for forecast:
-            # v(S) = H * (1 + W_S + M_S + W_S * M_S)
-            # Base value v(empty) = H
             H = historical_baseline
             W = weather_turnout_impact
             M = seasonality_factor
 
-            # Sigmoid / Logistic is not used here; it is a linear multiplication
-            # v(empty) = H
-            # v(Weather) = H(1 + W)
-            # v(Seasonality) = H(1 + M)
-            # v(Both) = H(1 + W + M + W*M)
-            # Shapley Values for the deviations from base H:
             shap_weather_day = H * W + 0.5 * H * W * M
             shap_seasonality_day = H * M + 0.5 * H * W * M
 
@@ -370,7 +320,6 @@ class PredictionService:
                 "quantity": predicted_qty
             })
             total_forecasted += predicted_qty
-
             total_shap_weather += shap_weather_day
             total_shap_seasonality += shap_seasonality_day
 
