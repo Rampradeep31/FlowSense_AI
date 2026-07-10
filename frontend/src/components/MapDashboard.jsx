@@ -57,10 +57,14 @@ export default function MapDashboard({ selectedShipment, riskCategory }) {
     fetchRouteStatus();
   }, [selectedShipment]);
 
+  const coordinates = routeData?.shipment?.route?.waypoints
+    ? routeData.shipment.route.waypoints.map(wp => [wp[1], wp[0]])
+    : [];
+
   // Center on Maharashtra (Mumbai-Pune region) by default
   const defaultCenter = [19.076, 72.8777];
-  const center = routeData?.coordinates?.length > 0
-    ? routeData.coordinates[Math.floor(routeData.coordinates.length / 2)]
+  const center = coordinates.length > 0
+    ? coordinates[Math.floor(coordinates.length / 2)]
     : defaultCenter;
 
   // Determine line color based on risk category
@@ -84,9 +88,9 @@ export default function MapDashboard({ selectedShipment, riskCategory }) {
       </div>
 
       <div className="flex-1 rounded-xl overflow-hidden border border-slate-800 relative min-h-[300px] z-10">
-        {routeData?.coordinates?.length > 0 ? (
+        {coordinates.length > 0 ? (
           <MapContainer
-            key={`${selectedShipment.id}-${routeData.coordinates.length}`}
+            key={`${selectedShipment.id}-${coordinates.length}`}
             center={center}
             zoom={8.5}
             style={{ height: '100%', width: '100%', background: '#0b0f19' }}
@@ -99,7 +103,7 @@ export default function MapDashboard({ selectedShipment, riskCategory }) {
 
             {/* Polyline Route */}
             <Polyline
-              positions={routeData.coordinates}
+              positions={coordinates}
               pathOptions={{
                 color: getPolylineColor(),
                 weight: 4,
@@ -109,35 +113,35 @@ export default function MapDashboard({ selectedShipment, riskCategory }) {
             />
 
             {/* Origin Marker */}
-            <Marker position={routeData.coordinates[0]} icon={originIcon}>
+            <Marker position={coordinates[0]} icon={originIcon}>
               <Popup>
                 <div className="text-xs font-semibold">Origin: {selectedShipment.origin}</div>
               </Popup>
             </Marker>
 
             {/* Destination Marker */}
-            <Marker position={routeData.coordinates[routeData.coordinates.length - 1]} icon={destIcon}>
+            <Marker position={coordinates[coordinates.length - 1]} icon={destIcon}>
               <Popup>
                 <div className="text-xs font-semibold">Destination: {selectedShipment.destination}</div>
               </Popup>
             </Marker>
 
             {/* Waypoint Weather Markers */}
-            {routeData.weather_forecast && routeData.weather_forecast.map((wf, idx) => {
-              // Ensure we have weather coordinates
-              if (!wf.lat || !wf.lon) return null;
+            {routeData.weather && routeData.weather.map((wf, idx) => {
+              if (!wf.latitude || !wf.longitude) return null;
+              const firstForecast = wf.forecast?.[0] || { temp_c: 28.0, humidity_pct: 60.0, precipitation_mm: 0.0 };
               return (
                 <Marker
                   key={`weather-${idx}`}
-                  position={[wf.lat, wf.lon]}
-                  icon={createWeatherIcon(wf.temp)}
+                  position={[wf.latitude, wf.longitude]}
+                  icon={createWeatherIcon(firstForecast.temp_c)}
                 >
                   <Popup>
                     <div className="p-1 text-slate-200">
                       <div className="font-bold text-xs">Weather Snapshot</div>
-                      <div className="text-[11px] mt-1">Temp: {wf.temp}°C</div>
-                      <div className="text-[11px]">Humidity: {wf.humidity}%</div>
-                      <div className="text-[11px]">Precipitation: {Math.round((wf.pop || 0) * 100)}%</div>
+                      <div className="text-[11px] mt-1">Temp: {firstForecast.temp_c}°C</div>
+                      <div className="text-[11px]">Humidity: {firstForecast.humidity_pct}%</div>
+                      <div className="text-[11px]">Precipitation: {firstForecast.precipitation_mm} mm</div>
                     </div>
                   </Popup>
                 </Marker>

@@ -6,43 +6,45 @@ export default function AlertCenter({ onAlertUpdate }) {
   const [showCenter, setShowCenter] = useState(false);
 
   useEffect(() => {
-    // Connect to WebSocket alert broadcaster
-    const wsUrl = `ws://${window.location.hostname}:8000/api/v1/alerts/ws`;
-    let socket = new WebSocket(wsUrl);
+    let socket;
+    let timeoutId;
+    
+    const connect = () => {
+      const wsUrl = `ws://${window.location.hostname}:8000/api/v1/alerts/ws`;
+      socket = new WebSocket(wsUrl);
 
-    socket.onopen = () => {
-      console.log('Alert WebSocket connected');
-    };
+      socket.onopen = () => {
+        console.log('Alert WebSocket connected');
+      };
 
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('Received WebSocket alert event:', data);
-        // Prepend new alert to the state list
-        setAlerts((prev) => [data, ...prev]);
-        
-        // Trigger parent callback to refresh data
-        if (onAlertUpdate) {
-          onAlertUpdate(data);
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Received WebSocket alert event:', data);
+          setAlerts((prev) => [data, ...prev]);
+          if (onAlertUpdate) {
+            onAlertUpdate(data);
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket alert payload:', err);
         }
-      } catch (err) {
-        console.error('Failed to parse WebSocket alert payload:', err);
-      }
+      };
+
+      socket.onerror = (error) => {
+        console.error('Alert WebSocket error:', error);
+      };
+
+      socket.onclose = () => {
+        console.log('Alert WebSocket disconnected. Reconnecting in 5s...');
+        timeoutId = setTimeout(connect, 5000);
+      };
     };
 
-    socket.onerror = (error) => {
-      console.error('Alert WebSocket error:', error);
-    };
-
-    socket.onclose = () => {
-      console.log('Alert WebSocket disconnected. Reconnecting in 5s...');
-      setTimeout(() => {
-        // Simple reconnect logic
-      }, 5000);
-    };
+    connect();
 
     return () => {
-      socket.close();
+      if (socket) socket.close();
+      clearTimeout(timeoutId);
     };
   }, [onAlertUpdate]);
 

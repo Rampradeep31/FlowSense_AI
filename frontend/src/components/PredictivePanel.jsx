@@ -31,7 +31,7 @@ export default function PredictivePanel({ selectedShipment, onPredictionLoaded, 
         const spoilageData = spoilageResp.ok ? await spoilageResp.json() : null;
 
         // 3. Fetch Temperature Telemetry
-        const tempResp = await fetch(`http://localhost:8000/api/v1/shipments/${selectedShipment.id}/temperatures`);
+        const tempResp = await fetch(`http://localhost:8000/api/v1/shipments/${selectedShipment.id}/temperature-log`);
         const tempData = tempResp.ok ? await tempResp.json() : [];
 
         setDelayPred(delayData);
@@ -231,7 +231,7 @@ export default function PredictivePanel({ selectedShipment, onPredictionLoaded, 
                 
                 <Line
                   type="monotone"
-                  dataKey="temperature"
+                  dataKey="temperature_c"
                   name="Temperature (°C)"
                   stroke="#10b981"
                   strokeWidth={2.5}
