@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+flowsense.db
+test_flowsense.db
+.env
+.pytest_cache/
+.mypy_cache/
