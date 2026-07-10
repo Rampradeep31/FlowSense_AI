@@ -4,6 +4,9 @@ from app.database import async_session_maker
 from app.services.sensor import sensor_simulator
 import random
 
+from sqlalchemy import select
+from app.models.shipment import Shipment
+
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
@@ -20,6 +23,15 @@ async def poll_sensors_job():
     async with async_session_maker() as db:
         try:
             for box_id in ACTIVE_COLD_BOXES:
+                # Query for any active shipment currently using this cold box
+                stmt = select(Shipment).where(
+                    Shipment.cold_box_id == box_id,
+                    Shipment.status.in_(["created", "in-transit", "delayed"])
+                )
+                shipment_res = await db.execute(stmt)
+                active_shipment = shipment_res.scalars().first()
+                shipment_id = str(active_shipment.id) if active_shipment else None
+
                 # 15% chance of simulating a temp excursion warning on BOX-003
                 failing = False
                 if box_id == "BOX-003" and random.random() < 0.15:
@@ -30,6 +42,7 @@ async def poll_sensors_job():
                 await sensor_simulator.generate_readings(
                     db=db,
                     cold_box_id=box_id,
+                    shipment_id=shipment_id,
                     failing=failing,
                     duration_minutes=5,
                     interval_minutes=5

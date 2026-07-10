@@ -65,6 +65,14 @@ class SensorSimulator:
         # Refresh to load auto-generated IDs
         for r in readings:
             await db.refresh(r)
+
+        # Run rules engine check if shipment_id is linked to trigger alerts in real-time
+        if shipment_id:
+            try:
+                from app.services.rules_engine import rules_engine
+                await rules_engine.check_shipment_alerts(db, int(shipment_id))
+            except Exception as e:
+                logger.error(f"Rules engine trigger failed in sensor simulator: {e}")
             
         return readings
 
