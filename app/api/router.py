@@ -11,6 +11,7 @@ from app.api.endpoints import (
     alert,
     prediction,
     simulation,
+    compliance,
 )
 
 api_router = APIRouter()
@@ -26,3 +27,4 @@ api_router.include_router(shipment.router, prefix="/shipments", tags=["Shipment 
 api_router.include_router(alert.router, prefix="/alerts", tags=["Alert Management"])
 api_router.include_router(prediction.router, prefix="/predictions", tags=["AI Predictions"])
 api_router.include_router(simulation.router, prefix="/simulation", tags=["What-If Simulation"])
+api_router.include_router(compliance.router, prefix="/compliance", tags=["Compliance & Audits"])
