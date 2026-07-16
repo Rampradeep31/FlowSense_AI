@@ -1,4 +1,4 @@
-# FlowSense AI: Intelligent Cold Chain Monitoring & Decision Support
+# FlowSense AI: Intelligent Cold Chain Monitoring & Decision Support system
 
 FlowSense AI is an explainable AI-powered decision support system designed for India's pharmaceutical distribution. Specifically, it empowers a District Cold Chain Officer in Maharashtra to manage vaccine and insulin shipments from Mumbai hubs to district hospitals and primary health centers (PHCs), directly tackling thermal excursions and transit delay losses (Rs 15-20 lakh/year).
 
