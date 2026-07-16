@@ -7,7 +7,7 @@ Write-Host "--------------------------------------------------" -ForegroundColor
 
 # 1. Start the FastAPI Backend in a new window
 Write-Host "[1/3] Starting FastAPI Backend on http://localhost:8000..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host 'Starting FastAPI Backend...' -ForegroundColor Green; .venv\Scripts\activate; uvicorn app.main:app --reload --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host 'Starting FastAPI Backend...' -ForegroundColor Green; .venv\Scripts\activate; uvicorn backend.app.main:app --reload --port 8000"
 
 # 2. Start the Vite React Frontend in a new window
 Write-Host "[2/3] Starting Vite React Frontend on http://localhost:5173..." -ForegroundColor Yellow
