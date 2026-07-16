@@ -1,0 +1,14 @@
+====================================================
+MODEL EVALUATION REPORT
+====================================================
+Model Type: Random Forest Regression Pipeline
+Train Samples: 960
+Test Samples: 240
+
+Metrics:
+- R-squared (R2) Score: 0.9783
+- Mean Absolute Error (MAE): Rs. 369.53
+- Root Mean Squared Error (RMSE): Rs. 485.53
+- Mean Absolute Percentage Error (MAPE): 4.54%
+- Prediction Confidence Score: 95.46%
+====================================================
